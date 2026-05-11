@@ -1,9 +1,9 @@
 name: Deploy
 
 on:
-  push:
-    branches: [main]
   workflow_dispatch:
+  # push trigger is disabled while GitHub-hosted runner billing is unavailable.
+  # Re-enable once a self-hosted runner is registered (and add `runs-on: self-hosted`).
 
 concurrency:
   group: deploy-vps
