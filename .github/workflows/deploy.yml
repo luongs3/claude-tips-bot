@@ -1,10 +1,9 @@
 name: Deploy
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
-  # Push trigger is disabled: the GitHub account is locked from running Actions.
-  # Deploy is currently handled by a cron on the VPS that pulls main directly
-  # (see /var/log/claude-tips-bot.log). Re-enable `push:` once Actions unlock.
 
 concurrency:
   group: deploy-vps
