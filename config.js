@@ -39,7 +39,8 @@ module.exports = {
   },
 
   ai: {
-    model: 'gemini-2.0-flash',
+    provider: 'openai',
+    model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
     temperature: 0.3,
     maxOutputTokens: 4000,
     delayBetweenRequests: 1500,

@@ -1,32 +1,24 @@
-const { GoogleGenerativeAI } = require('@google/generative-ai')
+const OpenAI = require('openai')
 require('dotenv').config()
 const config = require('./config')
 
 class Curator {
   constructor() {
-    if (!process.env.GEMINI_API_KEY) throw new Error('GEMINI_API_KEY missing in .env')
-    this.keys = process.env.GEMINI_API_KEY.split(',').map((k) => k.trim()).filter(Boolean)
+    if (!process.env.OPENAI_API_KEY) throw new Error('OPENAI_API_KEY missing from environment')
+    this.keys = process.env.OPENAI_API_KEY.split(',').map((k) => k.trim()).filter(Boolean)
     this.keyIdx = 0
     this._buildClient()
   }
 
   _buildClient() {
-    const genAI = new GoogleGenerativeAI(this.keys[this.keyIdx])
-    this.model = genAI.getGenerativeModel({
-      model: config.ai.model,
-      generationConfig: {
-        temperature: config.ai.temperature,
-        maxOutputTokens: config.ai.maxOutputTokens,
-        responseMimeType: 'application/json',
-      },
-    })
+    this.client = new OpenAI({ apiKey: this.keys[this.keyIdx] })
   }
 
   _rotateKey() {
     if (this.keys.length < 2) return false
     this.keyIdx = (this.keyIdx + 1) % this.keys.length
     this._buildClient()
-    console.log(`  🔁 Rotated to Gemini key #${this.keyIdx + 1}/${this.keys.length}`)
+    console.log(`  🔁 Rotated to OpenAI key #${this.keyIdx + 1}/${this.keys.length}`)
     return true
   }
 
@@ -34,15 +26,31 @@ class Curator {
     let lastErr
     for (let attempt = 0; attempt < config.ai.maxRetries; attempt++) {
       try {
-        const r = await this.model.generateContent(prompt)
-        return r.response.text()
+        const r = await this.client.chat.completions.create({
+          model: config.ai.model,
+          temperature: config.ai.temperature,
+          max_completion_tokens: config.ai.maxOutputTokens,
+          response_format: { type: 'json_object' },
+          messages: [
+            {
+              role: 'system',
+              content:
+                'You are a meticulous curator who selects only actionable, high-signal items for a software engineer who builds AI agents and uses Claude heavily. You always respond with valid JSON.',
+            },
+            { role: 'user', content: prompt },
+          ],
+        })
+        return r.choices?.[0]?.message?.content || ''
       } catch (e) {
         lastErr = e
+        const status = e.status || e.response?.status
         const msg = String(e.message || '')
-        const is429 = msg.includes('429') || /quota|rate/i.test(msg)
-        if (is429 && this._rotateKey()) continue
+        const isRateLimit = status === 429 || /quota|rate/i.test(msg)
+        if (isRateLimit && this._rotateKey()) continue
         const wait = 1500 * Math.pow(2, attempt)
-        console.warn(`  ⚠️  Gemini error attempt ${attempt + 1}: ${msg.slice(0, 140)} → wait ${wait}ms`)
+        console.warn(
+          `  ⚠️  OpenAI error attempt ${attempt + 1} (status ${status || '?'}): ${msg.slice(0, 140)} → wait ${wait}ms`,
+        )
         await new Promise((r) => setTimeout(r, wait))
       }
     }
@@ -59,7 +67,7 @@ Summary: ${(it.summary || '').slice(0, 400)}`
       })
       .join('\n\n---\n\n')
 
-    return `You are curating a daily digest for a software engineer who uses Claude (Anthropic) heavily and builds AI agents. He wants ONLY actionable, high-signal items that help him use AI/Claude/agents BETTER.
+    return `Curate a daily digest for a software engineer who uses Claude (Anthropic) heavily and builds AI agents. KEEP only items that help him use AI/Claude/agents BETTER.
 
 KEEP if the item is:
 - A concrete tip / technique (prompting, agent design, evals, dev workflow with AI)
@@ -74,23 +82,23 @@ REJECT if the item is:
 - Vague aggregator titles ("Best of...", "Top 10 AI news today")
 - Pure jobs / hiring posts
 
-Rules:
-- Output ONLY a JSON array. No prose, no markdown fences.
-- Each kept item: {"id": number, "category": "tip"|"tool"|"repo"|"insight"|"news", "title_vi": string, "why_useful_vi": string}
-- title_vi: a concise Vietnamese rewrite of the title (≤ 100 chars).
-- why_useful_vi: 1-2 short Vietnamese sentences on what's concretely actionable.
-- Priority order: most useful first. Max ${config.curator.maxItemsToSend} items per batch.
+Return JSON in EXACTLY this shape:
+{
+  "items": [
+    {"id": <number>, "category": "tip"|"tool"|"repo"|"insight"|"news", "title_vi": "<concise Vietnamese rewrite, ≤100 chars>", "why_useful_vi": "<1-2 short Vietnamese sentences on what's concretely actionable>"}
+  ]
+}
+
+Priority order: most useful first. Max ${config.curator.maxItemsToSend} items.
 
 Items:
 
-${listing}
-
-JSON array:`
+${listing}`
   }
 
   async curate(items) {
     if (!items.length) return []
-    console.log(`🤖 Curating ${items.length} items via Gemini (${config.ai.model})...`)
+    console.log(`🤖 Curating ${items.length} items via OpenAI (${config.ai.model})...`)
 
     const batches = []
     for (let i = 0; i < items.length; i += config.ai.batchSize) {
@@ -113,19 +121,11 @@ JSON array:`
       }
       let picks = []
       try {
-        picks = JSON.parse(text)
+        const parsed = JSON.parse(text)
+        picks = Array.isArray(parsed?.items) ? parsed.items : Array.isArray(parsed) ? parsed : []
       } catch {
-        const start = text.indexOf('[')
-        const end = text.lastIndexOf(']')
-        if (start >= 0 && end > start) {
-          try {
-            picks = JSON.parse(text.slice(start, end + 1))
-          } catch {
-            console.warn(`  ⚠️  Batch ${b + 1}: failed to parse JSON. Head: ${text.slice(0, 200)}`)
-          }
-        }
+        console.warn(`  ⚠️  Batch ${b + 1}: failed to parse JSON. Head: ${text.slice(0, 200)}`)
       }
-      if (!Array.isArray(picks)) picks = []
       for (const p of picks) {
         const orig = batch[p.id]
         if (!orig) continue
@@ -141,7 +141,7 @@ JSON array:`
 
     if (curated.length === 0 && items.length > 0) {
       console.warn(
-        `⚠️  Gemini returned no items (${allBatchesFailed ? 'all batches failed' : 'no picks'}); falling back to heuristic ranker.`,
+        `⚠️  OpenAI returned no items (${allBatchesFailed ? 'all batches failed' : 'no picks'}); falling back to heuristic ranker.`,
       )
       return heuristicCurate(items, config.curator.maxItemsToSend)
     }
@@ -150,7 +150,7 @@ JSON array:`
   }
 }
 
-// Source weights for heuristic ranking when Gemini is unavailable.
+// Source weights for heuristic ranking when the LLM is unavailable.
 const SOURCE_WEIGHT = {
   'Simon Willison': 10,
   'Anthropic News': 10,
@@ -226,7 +226,7 @@ function heuristicCurate(items, maxItems) {
     ...it,
     category: it.type === 'repo' ? 'repo' : 'insight',
     titleVi: it.title,
-    whyVi: `(auto-ranked — Gemini unavailable, score ${it._score.toFixed(1)})`,
+    whyVi: `(auto-ranked — LLM unavailable, score ${it._score.toFixed(1)})`,
   }))
 }
 

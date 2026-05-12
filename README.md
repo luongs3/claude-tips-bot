@@ -21,16 +21,19 @@ npm run tips:start        # start cron (09:00 UTC+7 daily)
 npm run tips:test-telegram # send a hello-world to verify the bot is wired up
 ```
 
-## Env (`.env` at repo root)
+## Env
 
-Already shared with the rest of the repo:
+On the VPS, `.env` lives at `/root/claude-tips-bot/.env`. Locally during dev, the file is read from the ai-bot repo root (one level above the bot dir).
 
 ```
-GEMINI_API_KEY=        # required (comma-separated allowed for key rotation)
+OPENAI_API_KEY=        # required (comma-separated allowed for key rotation)
+OPENAI_MODEL=          # optional, default gpt-4o-mini
 TELEGRAM_BOT_TOKEN=    # required
 TELEGRAM_CHAT_ID=      # required (the chat to deliver to)
 GITHUB_TOKEN=          # optional — raises GitHub search rate limit
 ```
+
+`.env` is gitignored AND excluded from rsync in the deploy workflow, so the VPS copy never gets clobbered. Update it directly on the VPS to rotate keys.
 
 ## Files
 
