@@ -1,9 +1,9 @@
 name: Deploy
 
 on:
+  push:
+    branches: [main]
   workflow_dispatch:
-  # push trigger is disabled while GitHub-hosted runner billing is unavailable.
-  # Re-enable once a self-hosted runner is registered (and add `runs-on: self-hosted`).
 
 concurrency:
   group: deploy-vps
@@ -11,25 +11,14 @@ concurrency:
 
 jobs:
   deploy:
-    runs-on: ubuntu-latest
+    runs-on: self-hosted
     env:
-      VPS_HOST: 31.220.75.26
-      VPS_USER: root
       VPS_PATH: /root/claude-tips-bot
+
     steps:
       - uses: actions/checkout@v4
 
-      - name: Load SSH key
-        uses: webfactory/ssh-agent@v0.9.1
-        with:
-          ssh-private-key: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
-
-      - name: Trust VPS host key
-        run: |
-          mkdir -p ~/.ssh
-          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
-
-      - name: Rsync source to VPS
+      - name: Rsync source to bot directory
         run: |
           rsync -avz --delete \
             --exclude .env \
@@ -39,16 +28,16 @@ jobs:
             --exclude .git \
             --exclude .github \
             --exclude .DS_Store \
-            ./ "$VPS_USER@$VPS_HOST:$VPS_PATH/"
+            ./ "$VPS_PATH/"
 
-      - name: Install deps on VPS
+      - name: Install deps
         run: |
-          ssh "$VPS_USER@$VPS_HOST" "cd $VPS_PATH && npm ci --omit=dev --no-audit --no-fund"
+          cd "$VPS_PATH" && npm ci --omit=dev --no-audit --no-fund
 
-      - name: Smoke test (load config + scraper require)
+      - name: Smoke test (require all modules)
         run: |
-          ssh "$VPS_USER@$VPS_HOST" "cd $VPS_PATH && node -e \"require('./config'); require('./scraper'); require('./curator'); require('./telegram'); console.log('require check OK')\""
+          cd "$VPS_PATH" && node -e "require('./config'); require('./scraper'); require('./curator'); require('./telegram'); console.log('require check OK')"
 
       - name: Show cron entry
         run: |
-          ssh "$VPS_USER@$VPS_HOST" "crontab -l | grep claude-tips-bot || echo 'WARNING: cron entry missing'"
+          crontab -l | grep claude-tips-bot || echo 'WARNING: cron entry missing'
