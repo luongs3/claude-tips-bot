@@ -11,14 +11,26 @@ concurrency:
 
 jobs:
   deploy:
-    runs-on: self-hosted
+    runs-on: ubuntu-latest
     env:
+      VPS_HOST: 31.220.75.26
+      VPS_USER: root
       VPS_PATH: /root/claude-tips-bot
 
     steps:
       - uses: actions/checkout@v4
 
-      - name: Rsync source to bot directory
+      - name: Load SSH key
+        uses: webfactory/ssh-agent@v0.9.1
+        with:
+          ssh-private-key: ${{ secrets.VPS_SSH_PRIVATE_KEY }}
+
+      - name: Trust VPS host key
+        run: |
+          mkdir -p ~/.ssh
+          ssh-keyscan -H "$VPS_HOST" >> ~/.ssh/known_hosts
+
+      - name: Rsync source to VPS
         run: |
           rsync -avz --delete \
             --exclude .env \
@@ -28,16 +40,16 @@ jobs:
             --exclude .git \
             --exclude .github \
             --exclude .DS_Store \
-            ./ "$VPS_PATH/"
+            ./ "$VPS_USER@$VPS_HOST:$VPS_PATH/"
 
-      - name: Install deps
+      - name: Install deps on VPS
         run: |
-          cd "$VPS_PATH" && npm ci --omit=dev --no-audit --no-fund
+          ssh "$VPS_USER@$VPS_HOST" "cd $VPS_PATH && npm ci --omit=dev --no-audit --no-fund"
 
       - name: Smoke test (require all modules)
         run: |
-          cd "$VPS_PATH" && node -e "require('./config'); require('./scraper'); require('./curator'); require('./telegram'); console.log('require check OK')"
+          ssh "$VPS_USER@$VPS_HOST" "cd $VPS_PATH && node -e \"require('./config'); require('./scraper'); require('./curator'); require('./telegram'); console.log('require check OK')\""
 
       - name: Show cron entry
         run: |
-          crontab -l | grep claude-tips-bot || echo 'WARNING: cron entry missing'
+          ssh "$VPS_USER@$VPS_HOST" "crontab -l | grep claude-tips-bot || echo 'WARNING: cron entry missing'"
