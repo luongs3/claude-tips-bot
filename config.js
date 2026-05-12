@@ -20,12 +20,10 @@ module.exports = {
       url: 'https://hnrss.org/newest?q=claude+OR+%22ai+agent%22+OR+anthropic+OR+%22claude+code%22&points=20',
     },
     { name: 'HN - Frontpage AI', url: 'https://hnrss.org/frontpage?q=AI+OR+LLM+OR+agent+OR+claude' },
-  ],
-
-  redditSources: [
-    { name: 'r/ClaudeAI', subreddit: 'ClaudeAI', limit: 20, minScore: 30 },
-    { name: 'r/LocalLLaMA', subreddit: 'LocalLLaMA', limit: 20, minScore: 50 },
-    { name: 'r/AI_Agents', subreddit: 'AI_Agents', limit: 15, minScore: 10 },
+    // Reddit feeds via public .rss (the JSON API now 403s without OAuth).
+    { name: 'r/ClaudeAI', url: 'https://www.reddit.com/r/ClaudeAI/top/.rss?t=day' },
+    { name: 'r/LocalLLaMA', url: 'https://www.reddit.com/r/LocalLLaMA/top/.rss?t=day' },
+    { name: 'r/AI_Agents', url: 'https://www.reddit.com/r/AI_Agents/top/.rss?t=day' },
   ],
 
   githubSources: [

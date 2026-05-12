@@ -4,7 +4,7 @@ const config = require('./config')
 
 const parser = new Parser({
   headers: { 'User-Agent': 'Mozilla/5.0 (compatible; ClaudeTipsBot/1.0)' },
-  timeout: 15000,
+  timeout: 30000,
 })
 
 const maxAgeMs = config.scraper.maxAgeHours * 3600 * 1000
@@ -42,40 +42,6 @@ async function fetchRss(src) {
     return items
   } catch (e) {
     if (!src.allowFail) console.warn(`  ✗ RSS  ${src.name.padEnd(24)} ${e.message}`)
-    return []
-  }
-}
-
-async function fetchReddit(src) {
-  try {
-    const url = `https://www.reddit.com/r/${src.subreddit}/top.json?t=day&limit=${src.limit}`
-    const { data } = await axios.get(url, {
-      headers: { 'User-Agent': 'ClaudeTipsBot/1.0' },
-      timeout: 15000,
-    })
-    const items = (data?.data?.children || [])
-      .map((c) => c.data)
-      .filter((p) => p && !p.over_18 && (p.score || 0) >= (src.minScore || 0))
-      .map((p) => {
-        const external =
-          p.url_overridden_by_dest && /^https?:/.test(p.url_overridden_by_dest) && !p.is_self
-            ? p.url_overridden_by_dest
-            : null
-        return {
-          source: src.name,
-          type: 'reddit',
-          title: p.title || '',
-          url: external || `https://www.reddit.com${p.permalink}`,
-          summary: (p.selftext || '').slice(0, 600),
-          score: p.score,
-          publishedAt: p.created_utc ? new Date(p.created_utc * 1000).toISOString() : null,
-        }
-      })
-      .filter((i) => i.title && i.url)
-    console.log(`  ✓ RDT  ${src.name.padEnd(24)} → ${items.length}`)
-    return items
-  } catch (e) {
-    console.warn(`  ✗ RDT  ${src.name.padEnd(24)} ${e.message}`)
     return []
   }
 }
@@ -120,16 +86,15 @@ function dedupe(items) {
 
 async function fetchAll() {
   console.log(
-    `📡 Fetching ${config.rssSources.length} RSS, ${config.redditSources.length} Reddit, ${config.githubSources.length} GitHub sources...`,
+    `📡 Fetching ${config.rssSources.length} RSS, ${config.githubSources.length} GitHub sources...`,
   )
-  const [rss, reddit, gh] = await Promise.all([
+  const [rss, gh] = await Promise.all([
     Promise.all(config.rssSources.map(fetchRss)),
-    Promise.all(config.redditSources.map(fetchReddit)),
     Promise.all(config.githubSources.map(fetchGithub)),
   ])
-  const all = dedupe([...rss.flat(), ...reddit.flat(), ...gh.flat()])
+  const all = dedupe([...rss.flat(), ...gh.flat()])
   console.log(`📊 ${all.length} unique items after dedup`)
   return all
 }
 
-module.exports = { fetchAll, fetchRss, fetchReddit, fetchGithub, dedupe }
+module.exports = { fetchAll, fetchRss, fetchGithub, dedupe }

@@ -98,6 +98,7 @@ JSON array:`
     }
 
     const curated = []
+    let allBatchesFailed = true
     for (let b = 0; b < batches.length; b++) {
       const batch = batches[b]
       console.log(`  → batch ${b + 1}/${batches.length} (${batch.length} items)`)
@@ -105,6 +106,7 @@ JSON array:`
       let text
       try {
         text = await this._safeCall(prompt)
+        allBatchesFailed = false
       } catch (e) {
         console.warn(`  ⚠️  Batch ${b + 1} failed entirely: ${e.message}`)
         continue
@@ -137,8 +139,95 @@ JSON array:`
       if (b < batches.length - 1) await new Promise((r) => setTimeout(r, config.ai.delayBetweenRequests))
     }
 
+    if (curated.length === 0 && items.length > 0) {
+      console.warn(
+        `⚠️  Gemini returned no items (${allBatchesFailed ? 'all batches failed' : 'no picks'}); falling back to heuristic ranker.`,
+      )
+      return heuristicCurate(items, config.curator.maxItemsToSend)
+    }
+
     return curated.slice(0, config.curator.maxItemsToSend)
   }
+}
+
+// Source weights for heuristic ranking when Gemini is unavailable.
+const SOURCE_WEIGHT = {
+  'Simon Willison': 10,
+  'Anthropic News': 10,
+  'Latent Space': 9,
+  'Hamel Husain': 8,
+  'Lilian Weng': 8,
+  'HN - Claude/Agent': 6,
+  'HN - Frontpage AI': 5,
+  'r/ClaudeAI': 6,
+  'r/LocalLLaMA': 5,
+  'r/AI_Agents': 5,
+}
+
+const GOOD_KEYWORDS = [
+  'claude code',
+  'agent',
+  'mcp',
+  'prompt',
+  'rag',
+  'eval',
+  'fine-tun',
+  'workflow',
+  'how to',
+  'guide',
+  'tutorial',
+  'tip',
+  'tricks',
+  'patterns',
+  'best practices',
+  'open source',
+]
+
+const BAD_KEYWORDS = [
+  'raises',
+  'funding',
+  'ipo',
+  'acquires',
+  'acquisition',
+  'lawsuit',
+  'valuation',
+  'unicorn',
+  'billion',
+  'million',
+  'startup raises',
+  'lays off',
+]
+
+function scoreItem(it) {
+  let s = 0
+  if (it.source && it.source.startsWith('GitHub')) s += 7
+  else s += SOURCE_WEIGHT[it.source] || 4
+
+  const t = (it.title || '').toLowerCase()
+  for (const k of GOOD_KEYWORDS) if (t.includes(k)) s += 2
+  for (const k of BAD_KEYWORDS) if (t.includes(k)) s -= 5
+
+  if (typeof it.stars === 'number') s += Math.min(5, Math.log10(it.stars + 1))
+  if (typeof it.score === 'number') s += Math.min(3, Math.log10(it.score + 1))
+
+  if (it.publishedAt) {
+    const ageH = (Date.now() - new Date(it.publishedAt).getTime()) / 3600000
+    if (ageH < 24) s += 2
+    else if (ageH < 48) s += 1
+  }
+
+  return s
+}
+
+function heuristicCurate(items, maxItems) {
+  const scored = items.map((it) => ({ ...it, _score: scoreItem(it) }))
+  scored.sort((a, b) => b._score - a._score)
+  return scored.slice(0, maxItems).map((it) => ({
+    ...it,
+    category: it.type === 'repo' ? 'repo' : 'insight',
+    titleVi: it.title,
+    whyVi: `(auto-ranked — Gemini unavailable, score ${it._score.toFixed(1)})`,
+  }))
 }
 
 module.exports = Curator

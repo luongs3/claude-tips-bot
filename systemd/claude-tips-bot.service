@@ -1,0 +1,20 @@
+[Unit]
+Description=Claude/AI Daily Digest Bot (uses node-cron with Asia/Ho_Chi_Minh)
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/root/claude-tips-bot
+Environment=NODE_ENV=production
+ExecStart=/usr/bin/node /root/claude-tips-bot/index.js start
+Restart=on-failure
+RestartSec=15s
+StandardOutput=append:/var/log/claude-tips-bot.log
+StandardError=append:/var/log/claude-tips-bot.log
+KillSignal=SIGINT
+TimeoutStopSec=30s
+
+[Install]
+WantedBy=multi-user.target

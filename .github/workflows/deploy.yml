@@ -50,6 +50,13 @@ jobs:
         run: |
           ssh "$VPS_USER@$VPS_HOST" "cd $VPS_PATH && node -e \"require('./config'); require('./scraper'); require('./curator'); require('./telegram'); console.log('require check OK')\""
 
-      - name: Show cron entry
+      - name: Install/refresh systemd service and restart
         run: |
-          ssh "$VPS_USER@$VPS_HOST" "crontab -l | grep claude-tips-bot || echo 'WARNING: cron entry missing'"
+          ssh "$VPS_USER@$VPS_HOST" "
+            install -m 644 $VPS_PATH/systemd/claude-tips-bot.service /etc/systemd/system/claude-tips-bot.service &&
+            systemctl daemon-reload &&
+            systemctl enable claude-tips-bot.service &&
+            systemctl restart claude-tips-bot.service &&
+            sleep 2 &&
+            systemctl is-active claude-tips-bot.service
+          "
