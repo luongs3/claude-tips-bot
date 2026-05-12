@@ -10,19 +10,55 @@ function todayInTz() {
   return new Date().toLocaleDateString('en-CA', { timeZone: config.scheduler.timezone })
 }
 
+function canonicalUrl(u) {
+  return String(u || '').replace(/[#?].*$/, '').toLowerCase()
+}
+
+function loadRecentlySentUrls(dir, daysBack) {
+  if (!fs.existsSync(dir)) return new Set()
+  const cutoff = Date.now() - daysBack * 86400000
+  const urls = new Set()
+  for (const f of fs.readdirSync(dir)) {
+    const m = f.match(/^digest_(\d{4}-\d{2}-\d{2})\.json$/)
+    if (!m) continue
+    const t = new Date(m[1]).getTime()
+    if (isNaN(t) || t < cutoff) continue
+    try {
+      const data = JSON.parse(fs.readFileSync(path.join(dir, f), 'utf-8'))
+      for (const it of data.items || []) if (it.url) urls.add(canonicalUrl(it.url))
+    } catch {}
+  }
+  return urls
+}
+
 async function runPipeline() {
   const start = Date.now()
   const date = todayInTz()
   console.log(`\n${'='.repeat(60)}\n🚀 claude-tips-bot daily run — ${date}\n${'='.repeat(60)}\n`)
 
-  const items = await fetchAll()
-  if (items.length === 0) {
+  const allItems = await fetchAll()
+  if (allItems.length === 0) {
     console.warn('⚠️  No items fetched from any source. Aborting.')
     return
   }
 
+  const daysBack = config.curator.dedupeAgainstRecentDays || 0
+  let items = allItems
+  if (daysBack > 0) {
+    const seen = loadRecentlySentUrls(config.output.outputDir, daysBack)
+    if (seen.size > 0) {
+      const before = items.length
+      items = items.filter((it) => !seen.has(canonicalUrl(it.url)))
+      console.log(`🧹 Skipping ${before - items.length} items already sent in the last ${daysBack} days`)
+    }
+  }
+
+  if (items.length === 0) {
+    console.warn('⚠️  Nothing new since the last digest. Sending an empty digest.')
+  }
+
   const curator = new Curator()
-  const picked = await curator.curate(items)
+  const picked = items.length > 0 ? await curator.curate(items) : []
   console.log(`✅ ${picked.length} items selected for digest`)
 
   const message = formatDigest(picked, date)

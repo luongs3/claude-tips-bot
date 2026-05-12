@@ -98,11 +98,24 @@ ${listing}`
 
   async curate(items) {
     if (!items.length) return []
-    console.log(`🤖 Curating ${items.length} items via OpenAI (${config.ai.model})...`)
+
+    // Heuristic pre-filter: rank everything cheaply, send only the top N to the LLM.
+    const cap = config.curator.maxItemsForLLM || items.length
+    let candidates = items
+    if (items.length > cap) {
+      const scored = items.map((it) => ({ ...it, _score: scoreItem(it) }))
+      scored.sort((a, b) => b._score - a._score)
+      candidates = scored.slice(0, cap)
+      console.log(
+        `✂️  Heuristic pre-filter: ${items.length} → ${candidates.length} (sending top ${cap} to LLM)`,
+      )
+    }
+
+    console.log(`🤖 Curating ${candidates.length} items via OpenAI (${config.ai.model})...`)
 
     const batches = []
-    for (let i = 0; i < items.length; i += config.ai.batchSize) {
-      batches.push(items.slice(i, i + config.ai.batchSize))
+    for (let i = 0; i < candidates.length; i += config.ai.batchSize) {
+      batches.push(candidates.slice(i, i + config.ai.batchSize))
     }
 
     const curated = []

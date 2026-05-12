@@ -36,20 +36,23 @@ module.exports = {
   scraper: {
     perFeedLimit: 15,
     maxAgeHours: 48,
+    summaryMaxChars: 250, // truncated at fetch time to keep LLM prompts small
   },
 
   ai: {
     provider: 'openai',
     model: process.env.OPENAI_MODEL || 'gpt-4o-mini',
     temperature: 0.3,
-    maxOutputTokens: 4000,
+    maxOutputTokens: 1500,
     delayBetweenRequests: 1500,
     maxRetries: 5,
-    batchSize: 40,
+    batchSize: 60, // big enough that maxItemsForLLM fits in one API call
   },
 
   curator: {
-    maxItemsToSend: 12,
+    maxItemsToSend: 12, // final cap in the Telegram digest
+    maxItemsForLLM: 25, // heuristic pre-filter to top N before calling the LLM
+    dedupeAgainstRecentDays: 7, // skip items already curated in the last N digests
   },
 
   scheduler: {

@@ -34,7 +34,7 @@ async function fetchRss(src) {
         type: 'article',
         title: (i.title || '').trim(),
         url: i.link,
-        summary: stripHtml(i.contentSnippet || i.content || '').slice(0, 600),
+        summary: stripHtml(i.contentSnippet || i.content || '').slice(0, config.scraper.summaryMaxChars),
         publishedAt: i.isoDate || i.pubDate || null,
       }))
       .filter((i) => i.title && i.url)
