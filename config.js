@@ -52,6 +52,9 @@ module.exports = {
   curator: {
     maxItemsToSend: 12, // final cap in the Telegram digest
     maxItemsForLLM: 25, // heuristic pre-filter to top N before calling the LLM
+    maxReposToLLM: 10, // of the LLM slots, at most this many can be repos
+    maxReposInDigest: 4, // hard cap on repos in the final Telegram digest
+    minRepoStars: 500, // drop GitHub repos below this star count
     dedupeAgainstRecentDays: 7, // skip items already curated in the last N digests
   },
 

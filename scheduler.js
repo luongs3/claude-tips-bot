@@ -68,11 +68,22 @@ async function runPipeline() {
       fs.mkdirSync(config.output.outputDir, { recursive: true })
     }
     const file = path.join(config.output.outputDir, `digest_${date}.json`)
+    // Merge with any existing same-day digest so URLs from earlier runs today
+    // stay in the dedupe history; otherwise re-runs lose what was already sent.
+    let existingItems = []
+    if (fs.existsSync(file)) {
+      try {
+        const prev = JSON.parse(fs.readFileSync(file, 'utf-8'))
+        if (Array.isArray(prev.items)) existingItems = prev.items
+      } catch {}
+    }
+    const seenUrls = new Set(picked.map((it) => canonicalUrl(it.url)))
+    const merged = [...picked, ...existingItems.filter((it) => !seenUrls.has(canonicalUrl(it.url)))]
     fs.writeFileSync(
       file,
-      JSON.stringify({ date, generatedAt: new Date().toISOString(), items: picked }, null, 2),
+      JSON.stringify({ date, generatedAt: new Date().toISOString(), items: merged }, null, 2),
     )
-    console.log(`💾 Saved → ${file}`)
+    console.log(`💾 Saved → ${file} (${picked.length} new + ${merged.length - picked.length} from earlier runs today)`)
   }
 
   await send(message)
