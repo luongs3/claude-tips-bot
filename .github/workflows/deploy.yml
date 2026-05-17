@@ -50,13 +50,11 @@ jobs:
         run: |
           ssh "$VPS_USER@$VPS_HOST" "cd $VPS_PATH && node -e \"require('./config'); require('./scraper'); require('./curator'); require('./telegram'); console.log('require check OK')\""
 
-      - name: Install/refresh systemd service and restart
+      - name: Ensure systemd unit is disabled (cron path is authoritative)
         run: |
           ssh "$VPS_USER@$VPS_HOST" "
-            install -m 644 $VPS_PATH/systemd/claude-tips-bot.service /etc/systemd/system/claude-tips-bot.service &&
-            systemctl daemon-reload &&
-            systemctl enable claude-tips-bot.service &&
-            systemctl restart claude-tips-bot.service &&
-            sleep 2 &&
-            systemctl is-active claude-tips-bot.service
+            systemctl disable --now claude-tips-bot.service 2>/dev/null || true;
+            rm -f /etc/systemd/system/claude-tips-bot.service;
+            systemctl daemon-reload;
+            ! systemctl is-active --quiet claude-tips-bot.service && echo 'systemd unit is inactive (expected)'
           "
