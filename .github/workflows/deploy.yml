@@ -42,6 +42,23 @@ jobs:
             --exclude .DS_Store \
             ./ "$VPS_USER@$VPS_HOST:$VPS_PATH/"
 
+      - name: Sync VPS .git to origin/main
+        # rsync excludes .git, so the VPS's git history can drift from the
+        # working tree. Force-sync .git here so run-daily.sh's `git fetch &&
+        # git reset --hard` is a no-op and the deployed commit hash is
+        # verifiable.
+        run: |
+          ssh "$VPS_USER@$VPS_HOST" "
+            cd $VPS_PATH
+            if [ ! -d .git ]; then
+              git init -q
+              git remote add origin https://github.com/luongs3/claude-tips-bot.git 2>/dev/null || true
+            fi
+            git fetch --depth=1 origin main
+            git reset --hard origin/main
+            git log -1 --oneline
+          "
+
       - name: Install deps on VPS
         run: |
           ssh "$VPS_USER@$VPS_HOST" "cd $VPS_PATH && npm ci --omit=dev --no-audit --no-fund"

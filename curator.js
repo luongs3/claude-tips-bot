@@ -84,7 +84,7 @@ REJECT if the item is:
 - Not specifically about AI / LLMs / agents / developer tooling for AI
 - Aggregator titles ("Best of...", "Top 10 AI news today")
 - Pure jobs / hiring posts
-- A REPO whose only describable trait is a vague phrase like "powerful framework", "easy to use", "great for X" — for REPOS only, if you can't name a specific differentiator, REJECT.
+- A REPO whose only describable trait is a vague phrase like "powerful framework", "easy to use", "great for X" — for REPOS only, if you can't name a specific differentiator, REJECT. The following Vietnamese phrases in why_useful_vi are AUTO-REJECTED: "khung mạnh mẽ", "framework mạnh mẽ", "cung cấp một framework", "hữu ích cho các ứng dụng", "tích hợp AI một cách dễ dàng", "tiết kiệm thời gian", "phương pháp và thực hành tốt nhất". Don't use them.
 
 HARD RULES:
 - Return at most ${maxRepos} items with category "repo". Prefer tips / insights / tools.
@@ -93,14 +93,24 @@ HARD RULES:
 - LANGUAGE: "title_vi" and "why_useful_vi" MUST be written in VIETNAMESE (tiếng Việt) with Vietnamese diacritics. NEVER use Chinese, Japanese, Korean, or any other language. If the source item is in Chinese/another language, TRANSLATE the meaning into Vietnamese — do not copy the original text. If you cannot translate it confidently into Vietnamese, DROP the item.
 - Allowed exceptions inside Vietnamese text: proper nouns (product / repo / company names like "Claude Code", "CowAgent"), and short English technical terms that have no common Vietnamese equivalent (e.g. "LoRA", "MCP", "fine-tune", "agent"). Everything else must be Vietnamese.
 - For REPOS, "why_useful_vi" should mention a specific technique, capability, number, or audience. Bad: "Cung cấp khung mạnh mẽ cho AI agents". Good: "Hỗ trợ tinh chỉnh 100+ LLM/VLM với LoRA/QLoRA; phù hợp khi cần fine-tune local".
+- For REPOS, "title_vi" MUST start with the repo name (the part after the slash in owner/repo). Example: original "bytedance/deer-flow" → title_vi starts with "deer-flow: …". Without the name, the title is useless for scanning.
 - "title_vi" should be concise (≤100 chars) and informative — keep the original name for tools/repos, but any descriptive words must be Vietnamese.
 
 Return JSON in EXACTLY this shape:
 {
   "items": [
-    {"id": <number>, "category": "tip"|"tool"|"repo"|"insight"|"news", "title_vi": "<concise Vietnamese rewrite, ≤100 chars>", "why_useful_vi": "<1-2 short Vietnamese sentences naming the specific takeaway/capability>"}
+    {"id": <number>, "category": "tip"|"tool"|"repo"|"insight"|"news", "title_vi": "<concise Vietnamese rewrite, ≤100 chars>", "why_useful_vi": "<1-2 short Vietnamese sentences naming the specific takeaway/capability>", "tweet_en": "<one-tweet English version, ≤220 chars, dev voice, no hashtags, no emojis, no @mentions, no leading 'TIL'/'BREAKING'; just the substance; do NOT include the URL — it is appended automatically>"}
   ]
 }
+
+TWEET RULES (tweet_en):
+- Audience: senior software engineers building with AI/agents/Claude/MCP. Write peer-to-peer, not promotional.
+- Format: one paragraph or up to 3 short lines. NO hashtags, NO emojis, NO clickbait hooks ("You won't believe..."), NO trailing "More 👇".
+- Open with the substance, not the source. Bad: "Simon Willison wrote about...". Good: "Claude Code now supports X, which means Y."
+- For REPOS: lead with what it does + the one differentiator. Bad: "Cool new repo!". Good: "deer-flow: open-source long-horizon agent harness from ByteDance with sandboxes + sub-agents. 67k stars."
+- For TIPS/INSIGHTS: lead with the takeaway. Bad: "Interesting article on prompts.". Good: "When evaluating agents, score the trace not just the final answer — catches silent failures Claude hides in tool calls."
+- ≤220 chars is a HARD LIMIT (we append a URL and need headroom). Aim for 180.
+- English only. No Vietnamese in tweet_en.
 
 Priority order: most useful first (tips and insights before repos when quality is equal). Max ${maxItems} items.
 
@@ -192,6 +202,7 @@ ${listing}`
         console.warn(`  ⚠️  Batch ${b + 1}: failed to parse JSON. Head: ${text.slice(0, 200)}`)
       }
       let droppedForCJK = 0
+      let droppedForGeneric = 0
       for (const p of picks) {
         const orig = batch[p.id]
         if (!orig) continue
@@ -199,15 +210,28 @@ ${listing}`
           droppedForCJK++
           continue
         }
+        const category = ['tip', 'tool', 'repo', 'insight', 'news'].includes(p.category) ? p.category : 'news'
+        const whyVi = p.why_useful_vi || ''
+        // Repos must have a specific differentiator. The prompt forbids generic
+        // praise like "framework mạnh mẽ" / "hữu ích cho các ứng dụng", but
+        // gpt-4o-mini ignores it often — enforce post-hoc.
+        if (category === 'repo' && isGenericViDesc(whyVi)) {
+          droppedForGeneric++
+          continue
+        }
         curated.push({
           ...orig,
-          category: ['tip', 'tool', 'repo', 'insight', 'news'].includes(p.category) ? p.category : 'news',
-          titleVi: p.title_vi || orig.title,
-          whyVi: p.why_useful_vi || '',
+          category,
+          titleVi: ensureRepoNameInTitle(p.title_vi || orig.title, orig),
+          whyVi,
+          tweetEn: typeof p.tweet_en === 'string' ? p.tweet_en.trim() : '',
         })
       }
       if (droppedForCJK) {
         console.warn(`  ⚠️  Batch ${b + 1}: dropped ${droppedForCJK} item(s) with non-Vietnamese (CJK) text`)
+      }
+      if (droppedForGeneric) {
+        console.warn(`  ⚠️  Batch ${b + 1}: dropped ${droppedForGeneric} repo item(s) with generic descriptions`)
       }
       if (b < batches.length - 1) await new Promise((r) => setTimeout(r, config.ai.delayBetweenRequests))
     }
@@ -255,6 +279,43 @@ const CJK_RE = /[぀-ヿ㐀-䶿一-鿿가-힯]/
 
 function containsCJK(s) {
   return typeof s === 'string' && CJK_RE.test(s)
+}
+
+// Patterns gpt-4o-mini reaches for when it has nothing specific to say about a
+// repo. The prompt forbids these; this is the runtime enforcement.
+const GENERIC_VI_PATTERNS = [
+  /khung mạnh mẽ/i,
+  /framework mạnh mẽ/i,
+  /cung cấp một framework/i,
+  /hữu ích cho các ứng dụng/i,
+  /một cách dễ dàng/i,
+  /dễ dàng (tích hợp|sử dụng)/i,
+  /tiết kiệm thời gian/i,
+  /phương pháp (và thực hành )?tốt nhất/i,
+  /nhiều (kỹ năng và )?công cụ hữu ích/i,
+]
+
+function isGenericViDesc(s) {
+  if (!s || typeof s !== 'string') return true
+  for (const re of GENERIC_VI_PATTERNS) if (re.test(s)) return true
+  return false
+}
+
+function repoNameFromUrl(url) {
+  const m = String(url || '').match(/github\.com\/[^/]+\/([^/?#]+)/i)
+  return m ? m[1].replace(/\.git$/, '') : null
+}
+
+// LLM often drops the repo name from title_vi, leaving headlines like
+// "Nền tảng tự động hóa quy trình với AI" with no hint that it's n8n. Prepend
+// the repo name when missing so the digest is scannable.
+function ensureRepoNameInTitle(title, orig) {
+  if (orig.type !== 'repo') return title
+  const repoName = repoNameFromUrl(orig.url)
+  if (!repoName) return title
+  const t = String(title || '')
+  if (t.toLowerCase().includes(repoName.toLowerCase())) return t
+  return `${repoName} — ${t}`
 }
 
 function hasConcreteDescription(it) {
@@ -367,3 +428,6 @@ function heuristicCurate(items, maxItems) {
 }
 
 module.exports = Curator
+module.exports.enforceRepoCap = enforceRepoCap
+module.exports.isGenericViDesc = isGenericViDesc
+module.exports.ensureRepoNameInTitle = ensureRepoNameInTitle

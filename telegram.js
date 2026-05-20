@@ -20,12 +20,15 @@ function formatDigest(items, date) {
   const blocks = items.map((it, idx) => {
     const emoji = CATEGORY_EMOJI[it.category] || '🔹'
     const title = htmlEscape(it.titleVi || it.title)
-    const src = htmlEscape(it.source)
+    // "GitHub - <topic>" is just the search query that surfaced the repo; the
+    // URL is the actual pointer, so the label adds nothing and looks repetitive
+    // when several repos come from the same topic.
+    const src = it.source && !/^GitHub - /.test(it.source) ? htmlEscape(it.source) : ''
     const why = it.whyVi ? htmlEscape(it.whyVi) : ''
     const url = htmlEscape(it.url)
     return [
       `${emoji} <b>${idx + 1}. ${title}</b>`,
-      `<i>${src}</i>`,
+      src ? `<i>${src}</i>` : '',
       why,
       `<a href="${url}">🔗 Read</a>`,
     ]

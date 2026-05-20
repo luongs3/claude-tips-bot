@@ -56,11 +56,22 @@ module.exports = {
     maxReposInDigest: 4, // hard cap on repos in the final Telegram digest
     minRepoStars: 500, // drop GitHub repos below this star count
     dedupeAgainstRecentDays: 7, // skip items already curated in the last N digests
+    // Permanent denylist for URLs known to have leaked through the 7-day dedup
+    // window (e.g. due to a missing/corrupt digest_<date>.json on the VPS).
+    // Add the canonical URL (lowercase, no query/hash) of repeat offenders.
+    denylistUrls: [
+      'https://github.com/farion1231/cc-switch',
+    ],
   },
 
   scheduler: {
     cron: '0 9 * * *',
     timezone: 'Asia/Ho_Chi_Minh',
+    xSlots: [
+      { name: 'morning',   cron: '30 9 * * *'  },
+      { name: 'afternoon', cron: '0 14 * * *'  },
+      { name: 'evening',   cron: '0 20 * * *'  },
+    ],
   },
 
   telegram: {

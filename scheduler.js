@@ -4,6 +4,7 @@ const cron = require('node-cron')
 const config = require('./config')
 const { fetchAll } = require('./scraper')
 const Curator = require('./curator')
+const { enforceRepoCap } = require('./curator')
 const { send, formatDigest } = require('./telegram')
 
 function todayInTz() {
@@ -53,12 +54,44 @@ async function runPipeline() {
     }
   }
 
+  // Permanent denylist: URLs known to have leaked through the rolling dedup
+  // (typically because a digest_<date>.json went missing on the VPS).
+  const denylist = new Set((config.curator.denylistUrls || []).map(canonicalUrl))
+  if (denylist.size > 0) {
+    const before = items.length
+    items = items.filter((it) => !denylist.has(canonicalUrl(it.url)))
+    if (items.length < before) {
+      console.log(`🚫 Skipped ${before - items.length} item(s) from the permanent denylist`)
+    }
+  }
+
+  // Diagnostic: per-type counts after dedup. Helps spot "all-repo" digests
+  // before they ship (the cap should catch them, but if articles vanish we
+  // want to know why).
+  const counts = items.reduce((acc, it) => {
+    acc[it.type] = (acc[it.type] || 0) + 1
+    return acc
+  }, {})
+  console.log(`📊 Eligible after dedup+denylist: ${items.length} (${JSON.stringify(counts)})`)
+
   if (items.length === 0) {
     console.warn('⚠️  Nothing new since the last digest. Sending an empty digest.')
   }
 
   const curator = new Curator()
-  const picked = items.length > 0 ? await curator.curate(items) : []
+  let picked = items.length > 0 ? await curator.curate(items) : []
+
+  // Belt-and-suspenders: if a future change to curator.js or stale code on the
+  // VPS skips the cap, enforce it here too. Idempotent if curator already
+  // capped.
+  const beforeCap = picked.length
+  picked = enforceRepoCap(picked, config.curator.maxReposInDigest).slice(
+    0,
+    config.curator.maxItemsToSend,
+  )
+  if (picked.length < beforeCap) {
+    console.warn(`⚠️  Safety-net cap dropped ${beforeCap - picked.length} item(s) — curator returned too many repos`)
+  }
   console.log(`✅ ${picked.length} items selected for digest`)
 
   const message = formatDigest(picked, date)
@@ -100,6 +133,26 @@ function startCron() {
     },
     { timezone: config.scheduler.timezone },
   )
+
+  // X auto-poster slots: each fires the standalone x-poster with the slot name.
+  const xSlots = config.scheduler.xSlots || []
+  for (const slot of xSlots) {
+    cron.schedule(
+      slot.cron,
+      () => {
+        const { spawn } = require('child_process')
+        console.log(`🐦 Firing x-poster slot=${slot.name}`)
+        const child = spawn('node', [path.join(__dirname, 'x-poster.js'), `--slot=${slot.name}`], {
+          stdio: 'inherit',
+          env: process.env,
+        })
+        child.on('exit', (code) => console.log(`🐦 x-poster(${slot.name}) exit ${code}`))
+      },
+      { timezone: config.scheduler.timezone },
+    )
+    console.log(`  🐦 x-slot ${slot.name}: "${slot.cron}"`)
+  }
+
   console.log('🟢 Scheduler running. Press Ctrl+C to stop.')
 }
 
